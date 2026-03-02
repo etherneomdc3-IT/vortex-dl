@@ -2238,791 +2238,210 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 <div id="toast" style="position:fixed;bottom:24px;right:24px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;padding:12px 18px;font-size:13px;box-shadow:0 8px 30px rgba(0,0,0,0.5);z-index:1000;transform:translateX(130%);transition:transform 0.3s ease;max-width:300px;"></div>
 
 <script>
-// ══════════════════════════════════════════
-//  NAVIGATION
-// ══════════════════════════════════════════
-function showPanel(id) {
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-' + id)?.classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  event?.currentTarget?.classList.add('active');
+/* =========================================================
+   GLOBAL STATE
+========================================================= */
+let downloads = [];
+let historyList = JSON.parse(localStorage.getItem("vdl_history") || "[]");
+
+/* =========================================================
+   PANEL SWITCH
+========================================================= */
+function showPanel(name){
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  document.getElementById("panel-"+name).classList.add("active");
+
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
+  event?.target?.closest(".nav-item")?.classList.add("active");
+
+  if(name==="history") renderHistory();
 }
 
-// ══════════════════════════════════════════
-//  TOAST
-// ══════════════════════════════════════════
-function toast(msg, type = 'cyan') {
-  const t = document.getElementById('toast');
-  const colors = { cyan: 'var(--accent)', green: 'var(--green)', amber: 'var(--amber)', red: 'var(--red)' };
-  t.style.borderLeftColor = colors[type] || colors.cyan;
-  t.textContent = msg;
-  t.style.transform = 'translateX(0)';
-  setTimeout(() => t.style.transform = 'translateX(130%)', 3000);
-}
+/* =========================================================
+   SUBMIT DOWNLOAD
+========================================================= */
+function submitDownload(){
+  const url = document.getElementById("dlUrl").value.trim();
+  if(!url){ alert("Enter video URL"); return; }
 
-// ══════════════════════════════════════════
-//  API KEY
-// ══════════════════════════════════════════
-const FULL_API_KEY = 'vdl_live_sk_a8f3c2e1d7b4098e6c3f2f9a';
-function copyApiKey() {
-  navigator.clipboard?.writeText(FULL_API_KEY).catch(() => {});
-  toast('API key copied to clipboard', 'green');
-}
-function copyWebhook() {
-  const url = document.getElementById('webhookUrl').textContent;
-  navigator.clipboard?.writeText(url).catch(() => {});
-  toast('Webhook URL copied!', 'green');
-}
-function copyCode(id) {
-  const el = document.getElementById(id);
-  if (el) navigator.clipboard?.writeText(el.innerText).catch(() => {});
-  toast('Copied to clipboard', 'green');
-}
+  const id = "JOB-"+Math.floor(Math.random()*999999);
+  const quality = document.getElementById("dlQuality").value;
+  const format  = document.getElementById("dlFormat").value;
 
-// ══════════════════════════════════════════
-//  API TEST
-// ══════════════════════════════════════════
-const testEndpointSel = document.getElementById('testEndpoint');
-testEndpointSel?.addEventListener('change', function() {
-  const bf = document.getElementById('testBodyField');
-  bf.style.display = (this.value === 'download' || this.value === 'harvest') ? 'flex' : 'none';
-});
-
-const MOCK_RESPONSES = {
-  status: { status: 'ok', version: '2.4.1', uptime: '14d 6h 22m', queue_depth: 3, active_agents: 4 },
-  jobs: { jobs: [
-    { job_id: 'job_d4f8a2c1e9', status: 'running', progress: 72, platform: 'youtube', quality: '1080p' },
-    { job_id: 'job_b2e7c9f3a1', status: 'queued', progress: 0, platform: 'tiktok', quality: '720p' },
-    { job_id: 'job_a1c5d8e2f6', status: 'done', progress: 100, platform: 'vimeo', quality: '4k' }
-  ], total: 247, page: 1 },
-  agents: { agents: [
-    { agent_id: 'agt_yt_01', name: 'YouTube Harvester', status: 'running', jobs_today: 14 },
-    { agent_id: 'agt_tt_01', name: 'TikTok Monitor', status: 'running', jobs_today: 32 }
-  ], total: 4 },
-  download: { job_id: 'job_' + Math.random().toString(36).slice(2,12), status: 'queued', position: 4, eta_seconds: 38, poll_url: '/v1/jobs/job_…', created_at: new Date().toISOString() },
-  harvest: { harvest_id: 'hvst_' + Math.random().toString(36).slice(2,10), status: 'processing', total_found: 24, queued: 24, estimated_total_time: '8m 30s' }
-};
-
-function runApiTest() {
-  const ep = document.getElementById('testEndpoint').value;
-  const out = document.getElementById('testOutput');
-  out.innerHTML = '<span style="color:var(--text3)">Sending request…</span>';
-  setTimeout(() => {
-    const resp = MOCK_RESPONSES[ep];
-    out.innerHTML = colorizeJson(JSON.stringify(resp, null, 2));
-    toast('API response received', 'green');
-  }, 600 + Math.random() * 400);
-}
-
-function colorizeJson(str) {
-  return str
-    .replace(/"([^"]+)"(?=\s*:)/g, '<span class="key">"$1"</span>')
-    .replace(/:\s*"([^"]+)"/g, ': <span class="str">"$1"</span>')
-    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="num">$1</span>')
-    .replace(/:\s*(true|false|null)/g, ': <span class="kw">$1</span>');
-}
-
-// ══════════════════════════════════════════
-//  DOWNLOADS
-// ══════════════════════════════════════════
-const dlJobs = [];
-
-function pasteDlUrl() {
-  navigator.clipboard?.readText().then(t => { document.getElementById('dlUrl').value = t; }).catch(() => {
-    document.getElementById('dlUrl').value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-  });
-}
-
-const PLATFORMS_MAP = {
-  'youtube.com': { name: 'YouTube', icon: '▶️' }, 'youtu.be': { name: 'YouTube', icon: '▶️' },
-  'tiktok.com': { name: 'TikTok', icon: '🎵' }, 'instagram.com': { name: 'Instagram', icon: '📸' },
-  'facebook.com': { name: 'Facebook', icon: '📘' }, 'vimeo.com': { name: 'Vimeo', icon: '🎬' },
-  'twitter.com': { name: 'Twitter/X', icon: '🐦' }, 'x.com': { name: 'Twitter/X', icon: '🐦' },
-  'reddit.com': { name: 'Reddit', icon: '🔴' }
-};
-
-function getPlatform(url) {
-  try { const h = new URL(url).hostname.replace('www.',''); for (const [k,v] of Object.entries(PLATFORMS_MAP)) if (h.includes(k)) return v; } catch(e) {}
-  return { name: 'Direct', icon: '🔗' };
-}
-
-function submitDownload() {
-  const url = document.getElementById('dlUrl').value.trim();
-  if (!url) { toast('Please enter a video URL', 'amber'); return; }
-  const platform = getPlatform(url);
-  const quality = document.getElementById('dlQuality').value;
-  const format = document.getElementById('dlFormat').value;
-  const threads = parseInt(document.getElementById('dlThreads').value);
-  const id = 'job_' + Math.random().toString(36).slice(2,12);
-  const job = { id, url, platform, quality, format, threads, progress: 0, status: 'queued', speed: '0', downloaded: 0, totalMb: 200 + Math.random() * 1800 };
-  dlJobs.push(job);
-  renderDlItem(job);
-  updateQueueBadge();
-  simulateJob(job);
-  toast('Job submitted: ' + id, 'cyan');
-  document.getElementById('dlUrl').value = '';
-}
-
-function renderDlItem(job) {
-  const list = document.getElementById('dlList');
-  const empty = list.querySelector('div[style*="text-align:center"]');
-  if (empty) empty.remove();
-  const div = document.createElement('div');
-  div.className = 'dl-item';
-  div.id = 'dl_' + job.id;
-  div.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:18px">${job.platform.icon}</span>
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${job.platform.name} · ${job.quality} ${job.format}</div>
-          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text3)">${job.id}</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="dl-pct" id="pct_${job.id}">0%</div>
-        <button onclick="cancelJob('${job.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px" title="Cancel">✕</button>
-      </div>
-    </div>
-    <div class="progress-track"><div class="progress-fill" id="bar_${job.id}" style="width:0%"></div></div>
-    <div class="dl-stats">
-      <span id="spd_${job.id}">0 MB/s</span>
-      <span id="byt_${job.id}">0 / ${job.totalMb.toFixed(0)} MB</span>
-      <span id="sts_${job.id}" style="color:var(--amber)">Queued — ${job.threads} threads</span>
-    </div>
-  `;
-  list.prepend(div);
-}
-
-function simulateJob(job) {
-  if (job.status === 'done' || job.status === 'cancelled') return;
-  job.status = 'running';
-  const tick = () => {
-    if (job.status === 'cancelled') return;
-    const speed = (2 + Math.random() * 10).toFixed(1);
-    job.progress = Math.min(job.progress + (parseFloat(speed) * job.threads * 0.08) / job.totalMb * 100, 100);
-    job.downloaded = job.totalMb * job.progress / 100;
-    document.getElementById('pct_'+job.id).textContent = job.progress.toFixed(1) + '%';
-    document.getElementById('bar_'+job.id).style.width = job.progress + '%';
-    document.getElementById('spd_'+job.id).textContent = speed + ' MB/s';
-    document.getElementById('byt_'+job.id).textContent = job.downloaded.toFixed(0) + ' / ' + job.totalMb.toFixed(0) + ' MB';
-    document.getElementById('sts_'+job.id).textContent = '⚡ ' + job.threads + ' threads active';
-    document.getElementById('sts_'+job.id).style.color = 'var(--green)';
-    if (job.progress >= 100) {
-      job.status = 'done';
-      document.getElementById('sts_'+job.id).textContent = '✓ Complete — Saving locally…';
-      document.getElementById('sts_'+job.id).style.color = 'var(--green)';
-      addActivity('Job ' + job.id + ' completed — ' + job.platform.name + ' ' + job.quality, 'green');
-      addLogEntry('POST', '/v1/webhooks/fire', '200');
-      addQueueJob(job);
-      // ── Save to history + trigger local file save ──
-      saveToHistory(job);
-      setTimeout(() => {
-        document.getElementById('sts_'+job.id).textContent = '✓ Complete · Saved to History';
-        triggerLocalSave(job);
-      }, 800);
-      return;
-    }
-    setTimeout(tick, 80 + Math.random() * 60);
-  };
-  setTimeout(tick, 500);
-}
-
-function cancelJob(id) {
-  const job = dlJobs.find(j => j.id === id);
-  if (job) job.status = 'cancelled';
-  document.getElementById('dl_' + id)?.remove();
-  updateQueueBadge();
-}
-
-function clearDone() {
-  dlJobs.filter(j => j.status === 'done').forEach(j => document.getElementById('dl_' + j.id)?.remove());
-}
-
-// ══════════════════════════════════════════
-//  QUEUE TABLE
-// ══════════════════════════════════════════
-const queueJobs = [
-  { id: 'job_d4f8a2c1e9', platform: 'YouTube', quality: '1080p', format: 'MP4', status: 'running', progress: 72, agent: 'agt_yt_01', created: '2 min ago' },
-  { id: 'job_b2e7c9f3a1', platform: 'TikTok',  quality: '720p',  format: 'MP4', status: 'running', progress: 41, agent: 'agt_tt_01', created: '4 min ago' },
-  { id: 'job_c9f2a7d3e8', platform: 'Vimeo',   quality: '4K',    format: 'MP4', status: 'queued',  progress: 0,  agent: 'Manual',   created: '7 min ago' },
-];
-
-function renderQueue() {
-  const tbody = document.getElementById('queueTable');
-  tbody.innerHTML = queueJobs.map(j => `
-    <tr>
-      <td><span style="font-family:var(--font-mono);font-size:11px;color:var(--accent)">${j.id}</span></td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text3)">URL…</td>
-      <td><span class="tag tag-muted">${j.platform}</span></td>
-      <td><span class="tag tag-cyan">${j.quality}</span></td>
-      <td><span class="tag tag-muted">${j.format}</span></td>
-      <td>${j.status === 'running' ? '<span class="tag tag-green">● Running</span>' : j.status === 'done' ? '<span class="tag tag-muted">Done</span>' : '<span class="tag tag-amber">Queued</span>'}</td>
-      <td style="min-width:120px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden"><div style="width:${j.progress}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:2px"></div></div>
-          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text3)">${j.progress}%</span>
-        </div>
-      </td>
-      <td><span style="font-family:var(--font-mono);font-size:11px;color:var(--purple)">${j.agent}</span></td>
-      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text3)">${j.created}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="cancelQueueJob('${j.id}')">Cancel</button></td>
-    </tr>
-  `).join('');
-  document.getElementById('queueCount').textContent = queueJobs.length;
-  document.getElementById('queueBadge').textContent = queueJobs.length;
-}
-
-function addQueueJob(job) {
-  queueJobs.unshift({ id: job.id, platform: job.platform.name, quality: job.quality, format: job.format, status: 'done', progress: 100, agent: 'Manual', created: 'just now' });
-  renderQueue();
-}
-
-function cancelQueueJob(id) {
-  const i = queueJobs.findIndex(j => j.id === id);
-  if (i > -1) queueJobs.splice(i, 1);
-  renderQueue();
-  toast('Job cancelled', 'amber');
-}
-
-function addDemoJobs() {
-  const platforms = ['YouTube','TikTok','Instagram','Facebook','Vimeo'];
-  queueJobs.unshift({ id: 'job_' + Math.random().toString(36).slice(2,12), platform: platforms[Math.floor(Math.random()*5)], quality: '1080p', format: 'MP4', status: 'queued', progress: 0, agent: 'Demo', created: 'just now' });
-  renderQueue();
-  toast('Demo job added to queue', 'cyan');
-}
-
-function updateQueueBadge() {
-  document.getElementById('queueBadge').textContent = queueJobs.length + dlJobs.filter(j=>j.status==='running').length;
-}
-
-// ══════════════════════════════════════════
-//  AGENTS
-// ══════════════════════════════════════════
-const agents = [
-  { id: 'agt_yt_01', name: 'YouTube Harvester', type: 'Channel Monitor', platform: 'YouTube', icon: '▶️', status: 'running', jobsToday: 14, totalJobs: 342, progress: 67 },
-  { id: 'agt_tt_01', name: 'TikTok Monitor',    type: 'Keyword Watcher', platform: 'TikTok',  icon: '🎵', status: 'running', jobsToday: 32, totalJobs: 1240, progress: 41 },
-  { id: 'agt_ig_01', name: 'Instagram Scraper', type: 'Playlist Scraper', platform: 'Instagram', icon: '📸', status: 'idle', jobsToday: 0, totalJobs: 88, progress: 0 },
-  { id: 'agt_vm_01', name: 'Vimeo Pro Watcher', type: 'RSS Feed Agent', platform: 'Vimeo', icon: '🎬', status: 'queued', jobsToday: 3, totalJobs: 57, progress: 20 },
-];
-
-function renderAgents() {
-  const grid = document.getElementById('agentGrid');
-  grid.innerHTML = agents.map(a => `
-    <div class="agent-card ${a.status}">
-      <div class="agent-head">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="agent-icon">${a.icon}</div>
-          <div>
-            <div class="agent-name">${a.name}</div>
-            <div class="agent-type">${a.type}</div>
-          </div>
-        </div>
-        <span class="tag ${a.status==='running'?'tag-green':a.status==='error'?'tag-red':a.status==='queued'?'tag-amber':'tag-muted'}">${a.status==='running'?'● Running':a.status==='error'?'✗ Error':a.status==='queued'?'⟳ Queued':'Idle'}</span>
-      </div>
-      <div class="agent-stats">
-        <div class="agent-stat"><div class="agent-stat-val">${a.jobsToday}</div><div class="agent-stat-label">Jobs Today</div></div>
-        <div class="agent-stat"><div class="agent-stat-val">${a.totalJobs}</div><div class="agent-stat-label">Total Jobs</div></div>
-      </div>
-      <div class="agent-progress"><div class="agent-progress-bar" style="width:${a.progress}%"></div></div>
-      <div style="display:flex;gap:6px;margin-top:12px">
-        <button class="btn btn-ghost btn-xs" onclick="triggerAgent('${a.id}')">▶ Run Now</button>
-        <button class="btn btn-ghost btn-xs">⚙ Config</button>
-        <button class="btn btn-red btn-xs" onclick="removeAgent('${a.id}')">Stop</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function addNewAgent() {
-  document.getElementById('agentConfigCard').style.display = 'block';
-  document.getElementById('agentConfigCard').scrollIntoView({ behavior: 'smooth' });
-}
-
-function deployAgent() {
-  agents.push({ id: 'agt_new_' + Date.now(), name: 'New Agent', type: 'Channel Monitor', platform: 'Multi', icon: '🤖', status: 'queued', jobsToday: 0, totalJobs: 0, progress: 0 });
-  renderAgents();
-  document.getElementById('agentConfigCard').style.display = 'none';
-  document.getElementById('agentBadge').textContent = agents.length;
-  toast('Agent deployed successfully', 'green');
-}
-
-function triggerAgent(id) {
-  const a = agents.find(x => x.id === id);
-  if (a) { a.status = 'running'; a.jobsToday++; renderAgents(); addActivity('Agent ' + a.name + ' triggered manually', 'cyan'); addLogEntry('POST', '/v1/agents/' + id + '/run', '200'); toast('Agent triggered', 'cyan'); }
-}
-
-function removeAgent(id) {
-  const i = agents.findIndex(x => x.id === id);
-  if (i > -1) agents.splice(i, 1);
-  renderAgents();
-  document.getElementById('agentBadge').textContent = agents.length;
-  toast('Agent stopped', 'amber');
-}
-
-// ══════════════════════════════════════════
-//  ACTIVITY FEED
-// ══════════════════════════════════════════
-const activities = [
-  { text: '<strong>agt_yt_01</strong> completed job <strong>job_d4f8a2c1e9</strong> · YouTube 1080p · 847 MB', color: 'green', time: '2m ago' },
-  { text: 'Webhook fired → <strong>n8n.company.io</strong> · event: job.complete · 200 OK', color: 'cyan', time: '2m ago' },
-  { text: 'CMS push → <strong>Contentful</strong> · entry created: <em>entry_09f2ca</em>', color: 'purple', time: '3m ago' },
-  { text: '<strong>agt_tt_01</strong> discovered 12 new TikTok videos · queuing jobs', color: 'amber', time: '5m ago' },
-  { text: 'API key used from IP <strong>185.220.101.x</strong> · n8n workflow trigger', color: 'cyan', time: '6m ago' },
-];
-
-function renderActivity() {
-  const feed = document.getElementById('activityFeed');
-  feed.innerHTML = activities.slice(0, 8).map(a => `
-    <div class="activity-item">
-      <div class="activity-dot ${a.color}"></div>
-      <div class="activity-text">${a.text}</div>
-      <div class="activity-time">${a.time}</div>
-    </div>
-  `).join('');
-}
-
-function addActivity(text, color = 'cyan') {
-  activities.unshift({ text, color, time: 'just now' });
-  renderActivity();
-}
-
-// ══════════════════════════════════════════
-//  API LOGS
-// ══════════════════════════════════════════
-const logEntries = [
-  { time: '14:22:11', method: 'POST', path: '/v1/download', status: '202', agent: 'n8n' },
-  { time: '14:22:08', method: 'GET',  path: '/v1/jobs/job_d4f8a2c1e9', status: '200', agent: 'n8n' },
-  { time: '14:21:55', method: 'POST', path: '/v1/webhooks/fire', status: '200', agent: 'system' },
-  { time: '14:21:30', method: 'POST', path: '/v1/cms/publish/job_d4f8', status: '201', agent: 'system' },
-  { time: '14:20:47', method: 'GET',  path: '/v1/agents', status: '200', agent: 'tray.io' },
-  { time: '14:20:01', method: 'POST', path: '/v1/harvest/playlist', status: '202', agent: 'agt_yt_01' },
-  { time: '14:19:55', method: 'GET',  path: '/v1/status', status: '200', agent: 'healthcheck' },
-  { time: '14:18:22', method: 'POST', path: '/v1/download', status: '422', agent: 'n8n' },
-  { time: '14:17:11', method: 'DELETE', path: '/v1/jobs/job_old_9f2', status: '200', agent: 'manual' },
-];
-
-function renderLogs() {
-  const feed = document.getElementById('logFeed');
-  feed.innerHTML = logEntries.map(l => {
-    const sColor = l.status.startsWith('2') ? 'var(--green)' : l.status.startsWith('4') ? 'var(--amber)' : 'var(--red)';
-    const mColor = { GET: 'var(--green)', POST: 'var(--accent)', DELETE: 'var(--red)', PATCH: 'var(--amber)' }[l.method] || 'var(--text)';
-    return `<div class="log-entry">
-      <span class="log-time">${l.time}</span>
-      <span class="log-method" style="color:${mColor}">${l.method}</span>
-      <span class="log-path">${l.path}</span>
-      <span style="font-family:var(--font-mono);font-size:11px;color:var(--text3)">${l.agent}</span>
-      <span class="log-status" style="color:${sColor}">${l.status}</span>
-    </div>`;
-  }).join('');
-}
-
-function addLogEntry(method, path, status) {
-  const now = new Date();
-  const t = now.toTimeString().slice(0,8);
-  logEntries.unshift({ time: t, method, path, status, agent: 'system' });
-  renderLogs();
-}
-
-function clearLogs() { logEntries.length = 0; renderLogs(); toast('Logs cleared', 'amber'); }
-
-// ══════════════════════════════════════════
-//  API TABS
-// ══════════════════════════════════════════
-function switchApiTab(tab) {
-  document.querySelectorAll('[id^="api-"]').forEach(c => c.style.display = 'none');
-  const el = document.getElementById('api-' + tab);
-  if (el) el.style.display = 'block';
-  document.querySelectorAll('#apiTabBar .tab').forEach(t => t.classList.remove('active'));
-  event.currentTarget.classList.add('active');
-}
-
-function showEndpointDetail(id) {
-  const el = document.getElementById('detail-' + id);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-// ══════════════════════════════════════════
-//  INTEGRATION TABS
-// ══════════════════════════════════════════
-function switchIntTab(btn, tabId) {
-  document.querySelectorAll('#panel-n8n > div[id$="-tab"]').forEach(t => t.style.display = 'none');
-  document.getElementById(tabId).style.display = 'block';
-  btn.closest('.tab-bar').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-// ══════════════════════════════════════════
-//  CMS
-// ══════════════════════════════════════════
-function editCms(name) {
-  document.getElementById('cmsConfig').style.display = 'block';
-  document.getElementById('cmsConfigTitle').textContent = '⚙ Configure ' + name.charAt(0).toUpperCase() + name.slice(1);
-  document.getElementById('cmsConfig').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ══════════════════════════════════════════
-//  WEBHOOKS
-// ══════════════════════════════════════════
-function addWebhook() { toast('Webhook form coming soon — use API: POST /v1/webhooks', 'cyan'); }
-
-// ══════════════════════════════════════════
-//  LIVE SIMULATION
-// ══════════════════════════════════════════
-const LOG_PATHS = ['/v1/jobs', '/v1/agents', '/v1/download', '/v1/status', '/v1/webhooks/fire', '/v1/cms/publish/job_abc'];
-const LOG_METHODS = ['GET', 'GET', 'GET', 'POST', 'POST', 'DELETE'];
-const LOG_AGENTS = ['n8n', 'tray.io', 'agt_yt_01', 'agt_tt_01', 'manual', 'healthcheck'];
-const LOG_STATUS = ['200', '200', '200', '202', '202', '201', '422'];
-
-const ACTIVITY_MSGS = [
-  ['Agent <strong>agt_yt_01</strong> found 3 new videos on monitored channel', 'cyan'],
-  ['Webhook fired to <strong>n8n.company.io</strong> · 200 OK · 12ms', 'green'],
-  ['<strong>agt_tt_01</strong> completed batch of 8 TikTok downloads', 'green'],
-  ['CMS entry created in <strong>Contentful</strong> · field mapping applied', 'purple'],
-  ['API call from <strong>tray.io</strong> · GET /v1/jobs · 200 OK', 'cyan'],
-  ['Rate limit hit for platform <strong>Instagram</strong> · backing off 60s', 'amber'],
-];
-
-function simulateLive() {
-  const method = LOG_METHODS[Math.floor(Math.random() * LOG_METHODS.length)];
-  const path = LOG_PATHS[Math.floor(Math.random() * LOG_PATHS.length)];
-  const status = LOG_STATUS[Math.floor(Math.random() * LOG_STATUS.length)];
-  addLogEntry(method, path, status);
-
-  if (Math.random() < 0.4) {
-    const [text, color] = ACTIVITY_MSGS[Math.floor(Math.random() * ACTIVITY_MSGS.length)];
-    addActivity(text, color);
-  }
-
-  // animate queue progress
-  queueJobs.forEach(j => {
-    if (j.status === 'running') {
-      j.progress = Math.min(j.progress + Math.random() * 3, 99);
-    }
-  });
-  renderQueue();
-}
-
-// ══════════════════════════════════════════
-//  HISTORY ENGINE — localStorage persistence
-// ══════════════════════════════════════════
-const HISTORY_KEY = 'vortexdl_history_v1';
-
-function loadHistory() {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-  } catch(e) { return []; }
-}
-
-function saveHistory(arr) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(arr));
-  } catch(e) {
-    toast('Storage quota exceeded — oldest entries trimmed', 'amber');
-    // trim oldest 20 and retry
-    arr.splice(arr.length - 20, 20);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(arr));
-  }
-}
-
-function saveToHistory(job) {
-  const history = loadHistory();
-  const entry = {
-    id:         job.id,
-    url:        job.url,
-    title:      job.platform.name + ' Video · ' + job.quality,
-    platform:   job.platform.name,
-    icon:       job.platform.icon,
-    quality:    job.quality,
-    format:     job.format,
-    threads:    job.threads,
-    sizeMb:     parseFloat(job.totalMb.toFixed(1)),
-    status:     'done',
-    savedLocal: false,
-    timestamp:  new Date().toISOString(),
-    agent:      'Manual',
-  };
-  history.unshift(entry);
-  saveHistory(history);
-  renderHistoryPanel();
-  updateHistoryBadge();
-}
-
-function updateHistoryBadge() {
-  const h = loadHistory();
-  document.getElementById('historyBadge').textContent = h.length;
-}
-
-// ── LOCAL FILE SAVE ──────────────────────
-function triggerLocalSave(job) {
-  const history = loadHistory();
-  const entry = history.find(e => e.id === job.id);
-
-  // Build a metadata JSON "receipt" file for the download
-  const receipt = {
-    vortexdl_export: true,
-    version: '2.4.1',
-    export_time: new Date().toISOString(),
-    job: {
-      id:        job.id,
-      url:       job.url,
-      platform:  job.platform.name,
-      quality:   job.quality,
-      format:    job.format,
-      threads:   job.threads,
-      size_mb:   parseFloat(job.totalMb.toFixed(1)),
-      completed: new Date().toISOString(),
-      status:    'done',
-    },
-    api_endpoint: 'https://api.vortexdl.app/v1/jobs/' + job.id,
-    note: 'Video file saved by VortexDL Agent Platform. This JSON is a download receipt.'
+  const job = {
+    id,
+    url,
+    quality,
+    format,
+    progress:0,
+    status:"running",
+    size:(Math.random()*500+50).toFixed(0)+" MB",
+    created:new Date().toLocaleString()
   };
 
-  const blob = new Blob([JSON.stringify(receipt, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'vortexdl_' + job.id + '_receipt.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloads.push(job);
+  renderDownloads();
+  simulateProgress(job);
 
-  // Mark as saved in history
-  if (entry) {
-    entry.savedLocal = true;
-    saveHistory(history);
-    renderHistoryPanel();
-  }
-
-  toast('📥 Receipt saved locally: ' + a.download, 'green');
-  addActivity('Download receipt saved locally → <strong>' + a.download + '</strong>', 'green');
+  document.getElementById("dlUrl").value="";
 }
 
-// ── RENDER HISTORY PANEL ─────────────────
-let historyFilter = { search: '', platform: '', status: '', sort: 'newest' };
-
-function filterHistory() {
-  historyFilter.search   = (document.getElementById('histSearch')?.value || '').toLowerCase();
-  historyFilter.platform = document.getElementById('histPlatform')?.value || '';
-  historyFilter.status   = document.getElementById('histStatus')?.value   || '';
-  historyFilter.sort     = document.getElementById('histSort')?.value     || 'newest';
-  renderHistoryPanel();
-}
-
-function renderHistoryPanel() {
-  let history = loadHistory();
-
-  // inject some rich demo entries on first load
-  if (history.length === 0 && !sessionStorage.getItem('vdl_demo_injected')) {
-    history = getDemoHistory();
-    saveHistory(history);
-    sessionStorage.setItem('vdl_demo_injected', '1');
-  }
-
-  // filter
-  let filtered = history.filter(e => {
-    const s = historyFilter.search;
-    const matchSearch = !s || e.title.toLowerCase().includes(s) || e.url?.toLowerCase().includes(s)
-      || e.platform.toLowerCase().includes(s) || e.id.includes(s);
-    const matchPlatform = !historyFilter.platform || e.platform === historyFilter.platform;
-    const matchStatus = !historyFilter.status || e.status === historyFilter.status ||
-      (historyFilter.status === 'saved' && e.savedLocal);
-    return matchSearch && matchPlatform && matchStatus;
-  });
-
-  // sort
-  if (historyFilter.sort === 'oldest')  filtered.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-  else if (historyFilter.sort === 'size') filtered.sort((a,b) => b.sizeMb - a.sizeMb);
-  else if (historyFilter.sort === 'platform') filtered.sort((a,b) => a.platform.localeCompare(b.platform));
-  else filtered.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-  // stats
-  const totalMb = history.reduce((s,e) => s + (e.sizeMb||0), 0);
-  const platforms = new Set(history.map(e => e.platform)).size;
-  const today = history.filter(e => {
-    const d = new Date(e.timestamp); const n = new Date();
-    return d.toDateString() === n.toDateString();
-  }).length;
-
-  document.getElementById('h-total').textContent    = history.length;
-  document.getElementById('h-size').textContent     = totalMb >= 1024 ? (totalMb/1024).toFixed(1)+' GB' : totalMb.toFixed(0)+' MB';
-  document.getElementById('h-platforms').textContent = platforms;
-  document.getElementById('h-today').textContent    = today;
-
-  // storage usage estimate
-  const raw = localStorage.getItem(HISTORY_KEY) || '';
-  const kb  = (raw.length * 2 / 1024).toFixed(1);
-  const pct = Math.min((kb / 5120) * 100, 100);
-  document.getElementById('h-storage-bar').style.width = pct + '%';
-  document.getElementById('h-storage-lbl').textContent  = kb + ' KB / 5 MB';
-
-  document.getElementById('historyBadge').textContent = history.length;
-
-  const list = document.getElementById('historyList');
-
-  if (filtered.length === 0) {
-    list.innerHTML = `
-      <div id="historyEmpty" style="padding:60px 24px;text-align:center;color:var(--text3)">
-        <div style="font-size:40px;margin-bottom:12px;opacity:0.3">🔍</div>
-        <div style="font-size:13px">${history.length === 0 ? 'No download history yet.' : 'No results match your filters.'}</div>
-        <div style="font-size:12px;margin-top:6px">${history.length === 0 ? 'Complete a download and it will appear here automatically.' : 'Try adjusting your search or filters.'}</div>
-      </div>`;
+/* =========================================================
+   RENDER DOWNLOAD LIST
+========================================================= */
+function renderDownloads(){
+  const list = document.getElementById("dlList");
+  if(downloads.length===0){
+    list.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)">No active downloads.</div>';
     return;
   }
 
-  list.innerHTML = filtered.map(e => {
-    const dt      = new Date(e.timestamp);
-    const dateStr = dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-    const timeStr = dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-    const sizeStr = e.sizeMb >= 1024 ? (e.sizeMb/1024).toFixed(2)+' GB' : e.sizeMb.toFixed(0)+' MB';
-    const statusTag = e.savedLocal
-      ? `<span class="tag tag-green" style="font-size:9px">💾 Saved</span>`
-      : `<span class="tag tag-muted" style="font-size:9px">✓ Done</span>`;
-
-    return `<div class="hist-row" id="hrow_${e.id}">
-      <div class="hist-icon">${e.icon || '🔗'}</div>
-      <div class="hist-title">
-        <div class="hist-title-text" title="${e.url || ''}">${e.title}</div>
-        <div class="hist-id">${e.id}</div>
+  list.innerHTML = downloads.map(d=>`
+    <div class="dl-item" id="dl-${d.id}">
+      <strong>${d.url.substring(0,60)}</strong>
+      <div class="dl-meta">
+        <span class="tag tag-cyan">${d.quality}</span>
+        <span class="tag tag-purple">${d.format}</span>
+        <span class="tag tag-green">${d.status}</span>
       </div>
-      <div class="hist-size" style="font-family:var(--font-mono);font-size:11px;color:var(--text2)">${sizeStr}</div>
-      <div><span class="tag tag-cyan" style="font-size:9px">${e.quality}</span></div>
-      <div><span class="tag tag-muted" style="font-size:9px">${e.format}</span></div>
-      <div class="hist-date">${dateStr}<br>${timeStr}</div>
-      <div>${statusTag}</div>
-      <div class="hist-actions">
-        <button class="btn btn-ghost btn-xs" onclick="saveReceiptFromHistory('${e.id}')" title="Save receipt locally">💾</button>
-        <button class="btn btn-ghost btn-xs" onclick="redownload('${e.id}')" title="Re-download">↻</button>
-        <button class="btn btn-red btn-xs"   onclick="deleteHistoryEntry('${e.id}')" title="Delete">✕</button>
+      <div class="progress-track">
+        <div class="progress-fill" style="width:${d.progress}%"></div>
       </div>
-    </div>`;
-  }).join('');
+      <div class="dl-stats">
+        <span>${d.size}</span>
+        <span class="dl-pct">${d.progress}%</span>
+      </div>
+    </div>
+  `).join("");
 }
 
-// ── HISTORY ACTIONS ──────────────────────
-function saveReceiptFromHistory(id) {
-  const history = loadHistory();
-  const entry   = history.find(e => e.id === id);
-  if (!entry) return;
-
-  const receipt = {
-    vortexdl_export: true, version: '2.4.1',
-    export_time: new Date().toISOString(),
-    job: {
-      id: entry.id, url: entry.url, platform: entry.platform,
-      quality: entry.quality, format: entry.format,
-      size_mb: entry.sizeMb, completed: entry.timestamp, status: 'done'
+/* =========================================================
+   SIMULATE PROGRESS
+========================================================= */
+function simulateProgress(job){
+  const interval = setInterval(()=>{
+    if(job.progress>=100){
+      clearInterval(interval);
+      job.status="done";
+      renderDownloads();
+      autoSaveDownload(job);
+      return;
     }
-  };
-
-  const blob = new Blob([JSON.stringify(receipt, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'vortexdl_' + id + '_receipt.json';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-
-  entry.savedLocal = true;
-  saveHistory(history);
-  renderHistoryPanel();
-
-  // flash the row
-  const row = document.getElementById('hrow_' + id);
-  if (row) { row.classList.add('save-flash'); setTimeout(() => row.classList.remove('save-flash'), 900); }
-  toast('💾 Receipt saved locally', 'green');
+    job.progress+=Math.floor(Math.random()*15)+5;
+    if(job.progress>100) job.progress=100;
+    renderDownloads();
+  },600);
 }
 
-function redownload(id) {
-  const history = loadHistory();
-  const entry   = history.find(e => e.id === id);
-  if (!entry || !entry.url) { toast('No URL stored for this entry', 'amber'); return; }
-  // switch to downloader and pre-fill URL
-  showPanel('downloader');
-  document.getElementById('dlUrl').value = entry.url;
-  document.getElementById('dlQuality').value = entry.quality || 'Best';
-  toast('URL loaded — hit Submit to re-download', 'cyan');
+/* =========================================================
+   AUTO SAVE AFTER DOWNLOAD COMPLETE
+========================================================= */
+function autoSaveDownload(job){
+
+  /* create fake downloadable file (mobile compatible) */
+  const blob = new Blob(
+    ["Demo content for "+job.url],
+    {type:"application/octet-stream"}
+  );
+
+  const fileName = job.id+"."+job.format.toLowerCase();
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  /* save to local history */
+  saveToLocalHistory({
+    id:job.id,
+    title:job.url,
+    quality:job.quality,
+    format:job.format,
+    size:job.size,
+    date:new Date().toLocaleString()
+  });
+
+  /* remove from active list */
+  downloads = downloads.filter(d=>d.id!==job.id);
+  renderDownloads();
 }
 
-function deleteHistoryEntry(id) {
-  let history = loadHistory();
-  history = history.filter(e => e.id !== id);
-  saveHistory(history);
-  renderHistoryPanel();
-  toast('Entry removed from history', 'amber');
+/* =========================================================
+   SAVE TO LOCAL STORAGE
+========================================================= */
+function saveToLocalHistory(item){
+  historyList.unshift(item);
+  localStorage.setItem("vdl_history",JSON.stringify(historyList));
+  updateHistoryBadge();
 }
 
-function clearHistory() {
-  if (!confirm('Clear all download history? This cannot be undone.')) return;
-  localStorage.removeItem(HISTORY_KEY);
-  sessionStorage.removeItem('vdl_demo_injected');
-  renderHistoryPanel();
-  toast('History cleared', 'amber');
+/* =========================================================
+   RENDER HISTORY
+========================================================= */
+function renderHistory(){
+  const panel = document.getElementById("panel-history");
+  if(!panel) return;
+
+  const container = panel.querySelector(".card-body");
+  if(!container) return;
+
+  if(historyList.length===0){
+    container.innerHTML="<div style='padding:40px;text-align:center;color:var(--text3)'>No download history.</div>";
+    return;
+  }
+
+  container.innerHTML = historyList.map(h=>`
+    <div class="hist-row">
+      <div class="hist-icon">🎬</div>
+      <div class="hist-title">
+        <div class="hist-title-text">${h.title}</div>
+        <div class="hist-id">${h.id}</div>
+      </div>
+      <div class="hist-size">${h.size}</div>
+      <div class="hist-quality">${h.quality}</div>
+      <div class="hist-format">${h.format}</div>
+      <div class="hist-date">${h.date}</div>
+      <div class="hist-actions">
+        <button class="btn btn-xs btn-red" onclick="deleteHistory('${h.id}')">Delete</button>
+      </div>
+    </div>
+  `).join("");
 }
 
-// ── CSV / JSON EXPORT ────────────────────
-function exportHistoryCSV() {
-  const history = loadHistory();
-  if (!history.length) { toast('No history to export', 'amber'); return; }
-  const header = ['Job ID','Platform','Title','Quality','Format','Size (MB)','Date','Saved Local','URL'];
-  const rows   = history.map(e => [
-    e.id, e.platform, '"' + (e.title||'').replace(/"/g,'""') + '"',
-    e.quality, e.format, e.sizeMb,
-    new Date(e.timestamp).toISOString(),
-    e.savedLocal ? 'Yes' : 'No',
-    '"' + (e.url||'') + '"'
-  ]);
-  const csv  = [header, ...rows].map(r => r.join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'vortexdl_history_' + Date.now() + '.csv';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-  toast('📊 History exported as CSV', 'green');
+/* =========================================================
+   DELETE HISTORY ITEM
+========================================================= */
+function deleteHistory(id){
+  historyList = historyList.filter(h=>h.id!==id);
+  localStorage.setItem("vdl_history",JSON.stringify(historyList));
+  renderHistory();
+  updateHistoryBadge();
 }
 
-function exportHistoryJSON() {
-  const history = loadHistory();
-  if (!history.length) { toast('No history to export', 'amber'); return; }
-  const blob = new Blob([JSON.stringify({ vortexdl_history: history, exported: new Date().toISOString() }, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'vortexdl_history_' + Date.now() + '.json';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-  toast('📦 History exported as JSON', 'green');
+/* =========================================================
+   UPDATE HISTORY BADGE
+========================================================= */
+function updateHistoryBadge(){
+  const badge = document.getElementById("historyBadge");
+  if(badge) badge.innerText = historyList.length;
 }
 
-// ── DEMO HISTORY DATA ────────────────────
-function getDemoHistory() {
-  const now = Date.now();
-  return [
-    { id:'job_d4f8a2c1e9', url:'https://youtube.com/watch?v=dQw4w9WgXcQ', title:'YouTube Video · 1080p', platform:'YouTube', icon:'▶️', quality:'1080p', format:'MP4', threads:8, sizeMb:847, status:'done', savedLocal:true, timestamp:new Date(now - 2*60000).toISOString(), agent:'agt_yt_01' },
-    { id:'job_b2e7c9f3a1', url:'https://tiktok.com/@user/video/123456', title:'TikTok Video · 720p', platform:'TikTok', icon:'🎵', quality:'720p', format:'MP4', threads:8, sizeMb:64, status:'done', savedLocal:false, timestamp:new Date(now - 15*60000).toISOString(), agent:'agt_tt_01' },
-    { id:'job_a1c5d8e2f6', url:'https://vimeo.com/836239101', title:'Vimeo Video · 4K', platform:'Vimeo', icon:'🎬', quality:'4K', format:'MP4', threads:16, sizeMb:3200, status:'done', savedLocal:true, timestamp:new Date(now - 3600000).toISOString(), agent:'Manual' },
-    { id:'job_f3b9e1d7c2', url:'https://instagram.com/p/xyz', title:'Instagram Video · 1080p', platform:'Instagram', icon:'📸', quality:'1080p', format:'MP4', threads:8, sizeMb:148, status:'done', savedLocal:false, timestamp:new Date(now - 2*3600000).toISOString(), agent:'agt_ig_01' },
-    { id:'job_c7a2f5e8b3', url:'https://facebook.com/watch?v=999', title:'Facebook Video · 720p', platform:'Facebook', icon:'📘', quality:'720p', format:'MP4', threads:4, sizeMb:312, status:'done', savedLocal:true, timestamp:new Date(now - 86400000).toISOString(), agent:'Manual' },
-    { id:'job_e9d4c1f7a8', url:'https://twitter.com/i/status/1234', title:'Twitter/X Video · 720p', platform:'Twitter/X', icon:'🐦', quality:'720p', format:'MP4', threads:4, sizeMb:28, status:'done', savedLocal:false, timestamp:new Date(now - 2*86400000).toISOString(), agent:'Manual' },
-    { id:'job_g2h5i8j1k4', url:'https://reddit.com/r/videos/xyz', title:'Reddit Video · 480p', platform:'Reddit', icon:'🔴', quality:'480p', format:'MP4', threads:4, sizeMb:91, status:'done', savedLocal:true, timestamp:new Date(now - 3*86400000).toISOString(), agent:'agt_tt_01' },
-  ];
+/* =========================================================
+   CLEAR DONE DOWNLOADS
+========================================================= */
+function clearDone(){
+  downloads = downloads.filter(d=>d.status!=="done");
+  renderDownloads();
 }
 
-
-renderActivity();
-renderLogs();
-renderAgents();
-renderQueue();
-renderHistoryPanel();
-updateHistoryBadge();
-
-setInterval(simulateLive, 2200);
-
-// pre-fill demo URL
-setTimeout(() => {
-  const ui = document.getElementById('dlUrl');
-  if (ui) ui.value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-}, 600);
+/* =========================================================
+   LOAD ON START
+========================================================= */
+document.addEventListener("DOMContentLoaded",()=>{
+  updateHistoryBadge();
+});
 </script>
 </body>
 </html>
